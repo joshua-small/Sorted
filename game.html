@@ -1,0 +1,20 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ultimate Sort Game</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/game.js" defer></script>
+</head>
+<body>
+  <h1>Ultimate Sort Game</h1>
+  <div class="settings">
+    <label for="itemTypes">Number of Item Types:</label>
+    <input type="range" id="itemTypes" min="2" max="32" value="5" oninput="updateItemCount()">
+    <span id="itemCount">5</span>
+    <button onclick="startGame()">Start Game</button>
+  </div>
+  <div id="game"></div>
+</body>
+</html>

@@ -1,0 +1,202 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ultimate Sort Game</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+
+    }
+
+    .settings {
+      margin-bottom: 20px;
+    }
+
+    .game{
+      display: flex;
+      flex-wrap: wrap;
+      /* justify-content: center; */
+      gap: 10px;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column-reverse;
+      justify-content: flex-start;
+
+      margin: 10px;
+      border: 2px solid #333;
+      border-top: hidden; /* So the container looks "open" at the top */
+      border-bottom-left-radius: 10px;
+      border-bottom-right-radius: 10px;
+      width: 10%;
+      aspect-ratio: 1 / 4; /* Maintain dynamic height based on width */
+      position: relative;
+      cursor: pointer;
+      background-color: #fff;
+      overflow: hidden;
+    }
+    .container.selected {
+      border-color: red;
+    }
+    .item {
+      height: calc(100% / 5); /* Dynamically sized based on container */
+      margin: 10px; /* Center items horizontally */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Ultimate Sort Game</h1>
+  <div class="settings">
+    <label for="itemTypes">Number of Item Types:</label>
+    <input type="range" id="itemTypes" min="2" max="32" value="5" oninput="updateItemCount()">
+    <span id="itemCount">5</span>
+    <button onclick="newGame()">New Game</button>
+  </div>
+  <div id="game"></div>
+  <script>
+    const predefinedColors = [
+      'red', 'blue', 'green', 'yellow', 'purple', 'orange', 'cyan', 'magenta', 'lime',
+      'teal', 'pink', 'brown', 'navy', 'gray', 'black', 'white', 'gold', 'silver',
+      'beige', 'coral', 'olive', 'maroon', 'indigo', 'violet', 'chocolate', 'tan',
+      'aqua', 'salmon', 'khaki', 'amber', 'lavender', 'plum'
+    ];
+
+    let itemTypes = [];
+    let containerCount;
+    const containerCapacity = 4; // Max items per container
+    let containers = [];
+    let selectedContainer = null;
+
+    function updateItemCount() {
+      const count = document.getElementById('itemTypes').value;
+      document.getElementById('itemCount').innerText = count;
+    }
+
+    function newGame() {
+      const numItemTypes = parseInt(document.getElementById('itemTypes').value);
+      if (isNaN(numItemTypes) || numItemTypes < 2 || numItemTypes > 32) {
+        alert('Please select a valid number of item types (2-32).');
+        return;
+      }
+
+      itemTypes = predefinedColors.slice(0, numItemTypes);
+      containerCount = itemTypes.length + 2; // Number of item types + 2 empty containers
+      containers = Array.from({ length: containerCount }, () => []);
+
+      // Initialize items with equal distribution
+      const allItems = [];
+      itemTypes.forEach(type => {
+        for (let i = 0; i < containerCapacity; i++) {
+          allItems.push(type);
+        }
+      });
+
+      // Shuffle items
+      for (let i = allItems.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [allItems[i], allItems[j]] = [allItems[j], allItems[i]];
+      }
+
+      // Distribute items to containers
+      for (let i = 0; i < allItems.length; i++) {
+        containers[i % (containerCount - 2)].push(allItems[i]);
+      }
+
+      renderGame();
+    }
+
+    function renderGame() {
+      const gameDiv = document.getElementById('game');
+      gameDiv.innerHTML = '';
+      containers.forEach((container, index) => {
+        const containerDiv = document.createElement('div');
+        containerDiv.className = 'container';
+        containerDiv.setAttribute('data-index', index);
+        if (selectedContainer === index) {
+          containerDiv.classList.add('selected');
+        }
+
+        // Render items from top to bottom (reverse the array for display)
+        container.forEach(item => {
+          const itemDiv = document.createElement('div');
+          itemDiv.className = 'item';
+          itemDiv.style.backgroundColor = item;
+          containerDiv.appendChild(itemDiv);
+        });
+
+        containerDiv.addEventListener('click', () => handleContainerClick(index));
+        gameDiv.appendChild(containerDiv);
+      });
+    }
+
+    function handleContainerClick(index) {
+      if (selectedContainer === null) {
+        // Select the first container
+        selectedContainer = index;
+      } else {
+        // Move items to the new container
+        moveItems(selectedContainer, index);
+        selectedContainer = null;
+      }
+      renderGame();
+    }
+
+    function moveItems(fromIndex, toIndex) {
+      const fromContainer = containers[fromIndex];
+      const toContainer = containers[toIndex];
+
+      if (!fromContainer.length) {
+        alert('Source container is empty!');
+        return;
+      }
+
+      if (toContainer.length >= containerCapacity) {
+        alert('Destination container is full!');
+        return;
+      }
+
+      const topItem = fromContainer[fromContainer.length - 1];
+      const stack = [];
+
+      // Get stack of matching items
+      while (fromContainer.length && fromContainer[fromContainer.length - 1] === topItem) {
+        stack.push(fromContainer.pop());
+      }
+
+      if (!toContainer.length || toContainer[toContainer.length - 1] === topItem) {
+        toContainer.unshift(...stack); // Add items to the top visually (start of the array)
+      } else {
+        fromContainer.push(...stack); // Return items if not a valid move
+        alert('Items must match to be moved!');
+      }
+
+      if (checkWin()) {
+        alert('You win!');
+      }
+    }
+
+    function checkWin() {
+      return containers.every(container => {
+        return container.length === 0 || (container.length === containerCapacity && container.every(item => item === container[0]));
+      });
+    }
+
+    // Start the game when the page loads
+    window.onload = () => {
+      newGame();
+    };
+  </script>
+</body>
+</html>
