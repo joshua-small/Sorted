@@ -38,6 +38,7 @@
         flex-wrap: wrap;
         justify-content: center;
         align-items: center;
+        background-color: #33333333;
       }
 
       .container {
@@ -47,7 +48,7 @@
         margin: 8px;
         border: 2px solid #333;
         border-top: hidden; /* So the container looks "open" at the top */
-        border-radius: 0 0 64px 64px;
+        border-radius: 0 0 100% 100% / 0 0 25% 25%;
         width: 64px;
         cursor: pointer;
         height: calc(64px * var(--container-capacity, 4));
@@ -67,37 +68,15 @@
         position: relative;
         font-weight: bold;
       }
-
-      .dark-mode {
-        background-color: #111;
-        color: #eee;
-      }
-
-      .dark-mode .container {
-        border-color: #eee;
-      }
-
-      .dark-mode .messages {
-        /* background-color: #333; */
-        color: #eee;
-      }
-
-      .dark-mode button {
-        background-color: #444;
-        color: #eee;
-      }
-
-      .dark-mode input[type="range"] {
-        background-color: #444;
-      }
     </style>
   </head>
   <body>
     <h1>Sorted</h1>
     <div class="settings">
       <div>
-        <label for="darkModeToggle">Dark Mode:</label>
-        <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode()" />
+        <label for="seed">Seed:</label>
+        <input type="text" id="seed" placeholder="Enter seed (optional)" />
+        <button onclick="newGame(document.getElementById('seed').value)">Generate</button>
       </div>
       <div>
         <label for="itemTypes">Number of Item Types:</label>
@@ -116,6 +95,8 @@
     <div class="messages" id="messages"></div>
     <div id="game"></div>
     <script>
+      // const predefinedColors = ["red", "blue", "green", "yellow", "purple", "orange", "cyan", "magenta", "lime", "teal", "pink", "brown", "navy", "gray", "black", "white", "gold", "silver", "beige", "coral", "olive", "maroon", "indigo", "violet", "chocolate", "tan", "aqua", "salmon", "khaki", "#FFBF00", "lavender", "plum"];
+
       function generateDistinctColors(count) {
         const colors = []
         const saturation = 70 // Keep saturation consistent for distinctness
@@ -148,38 +129,71 @@
         newGame() // Restart the game with the new capacity
       }
 
-      function newGame() {
+      function newGame(seed = null) {
         const numItemTypes = parseInt(document.getElementById("itemTypes").value)
         if (isNaN(numItemTypes) || numItemTypes < 2 || numItemTypes > 32) {
           displayMessage("Please select a valid number of item types (2-32).")
           return
         }
 
+        const seedInput = document.getElementById("seed")
+        if (!seed) {
+          seed = Math.random().toString(36).substring(2, 10) // Generate a random seed if not provided
+        }
+        seedInput.value = seed // Populate the seed input field
+        const pseudoRandom = xmur3(seed)
+
+        // Generate item types with distinct colors
         itemTypes = generateDistinctColors(numItemTypes).map((color, index) => ({
           id: index + 1,
           color,
         }))
+
         containerCount = itemTypes.length + 2 // Number of item types + 2 empty containers
         containers = Array.from({ length: containerCount }, () => [])
 
-        // Initialize items with equal distribution
         const allItems = []
         itemTypes.forEach((type) => {
-          for (let i = 0; i < containerCapacity; i++) {
-            allItems.push(type)
+          if (type && type.id && type.color) {
+            // Validate item type
+            for (let i = 0; i < containerCapacity; i++) {
+              allItems.push({ id: type.id, color: type.color })
+            }
+          } else {
+            console.error("Invalid item type encountered:", type)
           }
         })
 
-        // Shuffle items
+        // Debug: Ensure `allItems` is populated correctly
+        console.log("Initialized allItems:", allItems)
+
+        // Shuffle items deterministically with seed
         for (let i = allItems.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1))
+          const j = Math.floor(pseudoRandom() * (i + 1))
           ;[allItems[i], allItems[j]] = [allItems[j], allItems[i]]
         }
 
-        // Distribute items to containers
-        for (let i = 0; i < allItems.length; i++) {
-          containers[i % (containerCount - 2)].push(allItems[i])
+        // Distribute items into containers
+        let containerIndex = 0
+        for (const item of allItems) {
+          while (containers[containerIndex].length >= containerCapacity) {
+            containerIndex++
+            if (containerIndex >= containerCount) {
+              // Safeguard against out-of-bounds access
+              console.error("Exceeded available containers during distribution.")
+              return
+            }
+          }
+          if (item && item.id && item.color) {
+            // Validate item before pushing
+            containers[containerIndex].push(item)
+          } else {
+            console.error("Invalid item encountered during distribution:", item)
+          }
         }
+
+        // Debug: Ensure `containers` are populated correctly
+        console.log("Initialized containers:", containers)
 
         renderGame()
       }
@@ -187,29 +201,33 @@
       function renderGame() {
         const gameDiv = document.getElementById("game")
         gameDiv.innerHTML = ""
+
         containers.forEach((container, index) => {
+          if (!container) {
+            console.error("Undefined container at index:", index)
+            return
+          }
+
           const containerDiv = document.createElement("div")
           containerDiv.className = "container"
           containerDiv.setAttribute("data-index", index)
+
           if (selectedContainer === index) {
             containerDiv.classList.add("selected")
           }
 
-          // Render items from top to bottom (reverse the array for display)
           container.forEach((item) => {
+            if (!item || !item.color || !item.id) {
+              console.error("Invalid item encountered during rendering:", item)
+              return // Skip invalid items
+            }
+
             const itemDiv = document.createElement("div")
             itemDiv.className = "item"
             itemDiv.style.backgroundColor = item.color
 
-            // Debug: Log background color and ID
-            // console.log("Item color:", item.color, "Item ID:", item.id)
-
-            // Calculate appropriate text color
             const textColor = getAccessibleTextColor(item.color)
             itemDiv.style.color = textColor
-
-            // Debug: Log calculated text color
-            // console.log("Calculated text color:", textColor)
 
             itemDiv.innerText = item.id // Overlay the id text
             containerDiv.appendChild(itemDiv)
@@ -339,23 +357,24 @@
         }, 0)
       }
 
-      function toggleDarkMode() {
-  document.body.classList.toggle('dark-mode');
-  localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
-}
+      // Seedable pseudo-random generator
+      function xmur3(seed) {
+        let h = 1779033703 ^ seed.length
+        for (let i = 0; i < seed.length; i++) {
+          h = Math.imul(h ^ seed.charCodeAt(i), 3432918353)
+          h = (h << 13) | (h >>> 19)
+        }
+        return function () {
+          h = Math.imul(h ^ (h >>> 16), 2246822507)
+          h = Math.imul(h ^ (h >>> 13), 3266489909)
+          return (h ^= h >>> 16) >>> (0 / 4294967296)
+        }
+      }
 
-// Start the game when the page loads
+      // Start the game when the page loads
       window.onload = () => {
-  const prefersDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const savedDarkMode = localStorage.getItem('darkMode') === 'true';
-
-  if (savedDarkMode || (prefersDarkMode && localStorage.getItem('darkMode') === null)) {
-    document.body.classList.add('dark-mode');
-    document.getElementById('darkModeToggle').checked = true;
-  }
-
-  newGame();
-}
+        newGame()
+      }
     </script>
   </body>
 </html>
