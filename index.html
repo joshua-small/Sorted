@@ -5,151 +5,148 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sorted</title>
     <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        margin: 0;
+      }
 
-        body {
-          font-family: Arial, sans-serif;
-          text-align: center;
-          margin: 0;
-        }
+      .settings {
+        margin-bottom: 20px;
+      }
 
-        .settings {
-          margin-bottom: 20px;
-        }
+      .settings div {
+        margin: 10px;
+      }
 
-        .settings div {
-          margin: 10px;
-        }
+      .messages {
+        margin: 20px auto;
+        padding: 10px;
+        width: 50%;
+        font-size: 1rem;
+        text-align: center;
+        min-height: 1.5em;
+      }
 
-        .messages {
-          margin: 20px auto;
-          padding: 10px;
-          width: 50%;
-          font-size: 1rem;
-          text-align: center;
-          min-height: 1.5em;
-        }
+      #game {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+      }
 
-        #game {
-          display: flex;
-          flex-wrap: wrap;
-          justify-content: center;
-          align-items: center;
-        }
+      .container {
+        display: flex;
+        flex-direction: column-reverse;
+        justify-content: flex-start;
+        margin: 8px;
+        border: 2px solid #333;
+        border-top: hidden; /* So the container looks "open" at the top */
+        border-radius: 0 0 32px 32px;
+        width: 48px; /* Fixed width to prevent scaling issues */
+        height: calc(48px * var(--container-capacity, 4)); /* Maintain proportional height */
+        flex-shrink: 0; /* Prevent shrinking on smaller screens */
+      }
 
-        .container {
-          display: flex;
-          flex-direction: column-reverse;
-          justify-content: flex-start;
-          margin: 8px;
-          border: 2px solid #333;
-          border-top: hidden; /* So the container looks "open" at the top */
-          border-radius: 0 0 32px 32px;
-          width: 32px;
-          cursor: pointer;
-          height: calc(32px * var(--container-capacity, 4));
-        }
+      .item {
+        aspect-ratio: 1 / 1;
+        margin: auto auto 8px auto;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        border-radius: 50%;
+        position: relative;
+        font-weight: bold;
+        font-size: 1rem; /* Ensure consistent font size */
+        width: 80%; /* Proportional to container width */
+        height: auto; /* Let height follow width for consistent circles */
+      }
 
-        .container.selected {
-          border-color: red;
-        }
+      .button {
+        margin: 40px;
+      }
 
-        .item {
-          aspect-ratio: 1 / 1;
-          margin: 4px;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          border-radius: 50%;
-          position: relative;
-          font-weight: bold;
-        }
+      .dark-mode {
+        background-color: #111;
+        color: #eee;
+      }
 
-        .button {
-          margin: 40px;
-        }
+      .dark-mode .container {
+        border-color: #eee;
+      }
 
-        .dark-mode {
-          background-color: #111;
-          color: #eee;
-        }
+      .dark-mode .messages {
+        color: #eee;
+      }
 
-        .dark-mode .container {
-          border-color: #eee;
-        }
+      .dark-mode button {
+        background-color: #444;
+        color: #eee;
+      }
 
-        .dark-mode .messages {
-          color: #eee;
-        }
+      .dark-mode input[type="range"] {
+        background-color: #444;
+      }
 
-        .dark-mode button {
-          background-color: #444;
-          color: #eee;
-        }
+      .menu {
+        position: fixed;
+        top: 0;
+        right: 0;
+        width: 300px;
+        height: 100%;
+        background-color: #333;
+        color: white;
+        box-shadow: -2px 0 5px rgba(0, 0, 0, 0.5);
+        overflow-y: auto;
+        transition: transform 0.3s ease;
+        transform: translateX(100%);
+        z-index: 1000;
+      }
 
-        .dark-mode input[type="range"] {
-          background-color: #444;
-        }
+      .menu.visible {
+        transform: translateX(0);
+      }
 
-        .menu {
-          position: fixed;
-          top: 0;
-          right: 0;
-          width: 300px;
-          height: 100%;
-          background-color: #333;
-          color: white;
-          box-shadow: -2px 0 5px rgba(0, 0, 0, 0.5);
-          overflow-y: auto;
-          transition: transform 0.3s ease;
-          transform: translateX(100%);
-          z-index: 1000;
-        }
+      #menuToggle {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background-color: #444;
+        color: white;
+        border: none;
+        font-size: 24px;
+        padding: 10px;
+        cursor: pointer;
+      }
 
-        .menu.visible {
-          transform: translateX(0);
-        }
+      #menuClose {
+        background-color: #444;
+        color: white;
+        border: none;
+        font-size: 24px;
+        padding: 10px;
+        width: 100%;
+        text-align: left;
+      }
 
-        #menuToggle {
-          position: fixed;
-          top: 10px;
-          right: 10px;
-          background-color: #444;
-          color: white;
-          border: none;
-          font-size: 24px;
-          padding: 10px;
-          cursor: pointer;
-        }
+      .menu-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px;
+        background-color: #444;
+        color: white;
+        font-size: 1rem;
+        font-weight: bold;
+      }
 
-        #menuClose {
-          background-color: #444;
-          color: white;
-          border: none;
-          font-size: 24px;
-          padding: 10px;
-          width: 100%;
-          text-align: left;
-        }
-
-        .menu-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px;
-          background-color: #444;
-          color: white;
-          font-size: 1rem;
-          font-weight: bold;
-        }
-
-        .menu-header button {
-          background-color: transparent;
-          border: none;
-          color: white;
-          font-size: 1rem;
-          cursor: pointer;
-        }
-
+      .menu-header button {
+        background-color: transparent;
+        border: none;
+        color: white;
+        font-size: 1rem;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -165,12 +162,12 @@
           <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode()" />
         </div>
         <div class="label">
-          <label for="itemTypes">Number of Item Types:</label><br>
+          <label for="itemTypes">Number of Item Types:</label><br />
           <input type="range" id="itemTypes" min="2" max="32" value="8" oninput="updateItemCount()" />
           <span id="itemCount">8</span>
         </div>
         <div class="label">
-          <label for="containerCapacity">Container Capacity:</label><br>
+          <label for="containerCapacity">Container Capacity:</label><br />
           <input type="range" id="containerCapacity" min="2" max="8" value="4" oninput="updateContainerCapacity()" />
           <span id="capacityCount">4</span>
         </div>
