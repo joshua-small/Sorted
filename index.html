@@ -5,152 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sorted</title>
     <style>
-      @media (orientation:landscape) {
-        body {
-          font-family: Arial, sans-serif;
-          text-align: center;
-          margin: 0;
-        }
 
-        .settings {
-          margin-bottom: 20px;
-        }
-
-        .settings div {
-          margin: 10px;
-        }
-
-        .messages {
-          margin: 20px auto;
-          padding: 10px;
-          width: 50%;
-          font-size: 1rem;
-          text-align: center;
-          min-height: 1.5em;
-        }
-
-        #game {
-          display: flex;
-          flex-wrap: wrap;
-          justify-content: center;
-          align-items: center;
-        }
-
-        .container {
-          display: flex;
-          flex-direction: column-reverse;
-          justify-content: flex-start;
-          margin: 8px;
-          border: 2px solid #333;
-          border-top: hidden; /* So the container looks "open" at the top */
-          border-radius: 0 0 64px 64px;
-          width: 64px;
-          cursor: pointer;
-          height: calc(64px * var(--container-capacity, 4));
-        }
-
-        .container.selected {
-          border-color: red;
-        }
-
-        .item {
-          aspect-ratio: 1 / 1;
-          margin: 20%;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          border-radius: 50%;
-          position: relative;
-          font-weight: bold;
-        }
-
-        .button {
-          margin: 40px;
-        }
-
-        .dark-mode {
-          background-color: #111;
-          color: #eee;
-        }
-
-        .dark-mode .container {
-          border-color: #eee;
-        }
-
-        .dark-mode .messages {
-          color: #eee;
-        }
-
-        .dark-mode button {
-          background-color: #444;
-          color: #eee;
-        }
-
-        .dark-mode input[type="range"] {
-          background-color: #444;
-        }
-
-        .menu {
-          position: fixed;
-          top: 0;
-          right: 0;
-          width: 300px;
-          height: 100%;
-          background-color: #333;
-          color: white;
-          box-shadow: -2px 0 5px rgba(0, 0, 0, 0.5);
-          overflow-y: auto;
-          transition: transform 0.3s ease;
-          transform: translateX(100%);
-          z-index: 1000;
-        }
-
-        .menu.visible {
-          transform: translateX(0);
-        }
-
-        #menuToggle {
-          position: fixed;
-          top: 10px;
-          right: 10px;
-          background-color: #444;
-          color: white;
-          border: none;
-          font-size: 24px;
-          padding: 10px;
-          cursor: pointer;
-        }
-
-        #menuClose {
-          background-color: #444;
-          color: white;
-          border: none;
-          font-size: 24px;
-          padding: 10px;
-          width: 100%;
-          text-align: left;
-        }
-
-        .menu-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px;
-          background-color: #444;
-          color: white;
-          font-size: 1rem;
-          font-weight: bold;
-        }
-
-        .menu-header button {
-          background-color: transparent;
-          border: none;
-          color: white;
-          font-size: 1rem;
-          cursor: pointer;
-        }
-      }
-      @media (orientation:portrait) {
         body {
           font-family: Arial, sans-serif;
           text-align: center;
@@ -200,14 +55,13 @@
 
         .item {
           aspect-ratio: 1 / 1;
-          margin: 20%;
+          margin: 4px;
           display: flex;
           justify-content: center;
           align-items: center;
           border-radius: 50%;
           position: relative;
           font-weight: bold;
-          font-size: 80%;
         }
 
         .button {
@@ -295,7 +149,7 @@
           font-size: 1rem;
           cursor: pointer;
         }
-      }
+
     </style>
   </head>
   <body>
