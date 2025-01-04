@@ -39,27 +39,40 @@
         display: flex;
         flex-direction: column-reverse;
         justify-content: flex-start;
+        align-items: center;
         margin: 8px;
         border: 2px solid #333;
-        border-top: hidden; /* So the container looks "open" at the top */
+        border-top: hidden;
         border-radius: 0 0 32px 32px;
-        width: 48px; /* Fixed width to prevent scaling issues */
-        height: calc(48px * var(--container-capacity, 4)); /* Maintain proportional height */
-        flex-shrink: 0; /* Prevent shrinking on smaller screens */
+        width: 48px;
+        height: calc(48px * var(--container-capacity, 4));
+        flex-shrink: 0;
       }
 
       .item {
-        aspect-ratio: 1 / 1;
-        margin: auto auto 8px auto;
+        aspect-ratio: 1 / 1; /* Maintain square ratio */
         display: flex;
         justify-content: center;
         align-items: center;
-        border-radius: 50%;
-        position: relative;
+        border-radius: 50%; /* Circular shape */
+        width: 80%; /* Always relative to container */
+        max-width: 40px; /* Prevent over-expansion */
+        height: auto; /* Let height adjust to maintain aspect ratio */
+        margin: 0 0 8px 0; /* Remove any auto margins to avoid conflicts */
         font-weight: bold;
-        font-size: 1rem; /* Ensure consistent font size */
-        width: 80%; /* Proportional to container width */
-        height: auto; /* Let height follow width for consistent circles */
+        font-size: calc(0.5 * 48px); /* Dynamically scale text */
+      }
+
+      @media (max-width: 600px) {
+        .container {
+          width: 40px;
+          height: calc(40px * var(--container-capacity, 4));
+        }
+
+        .item {
+          max-width: 32px;
+          font-size: calc(0.5 * 40px);
+        }
       }
 
       .button {
