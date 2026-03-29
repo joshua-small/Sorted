@@ -1,0 +1,9 @@
+﻿{
+  "theme": "system",
+  "nColors": 9,
+  "nEmptyContainers": 2,
+  "containerVolume": 5,
+  "singleBlockMode": false,
+  "autoNextEnabled": true,
+  "autoNextSeconds": 12
+}
