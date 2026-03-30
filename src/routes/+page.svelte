@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
 
   type ThemePref = "system" | "light" | "dark";
@@ -31,6 +30,12 @@
     dst: number;
   };
 
+  type GameAction =
+    | { kind: "pour"; move: Move }
+    | { kind: "bonusSection" };
+
+  type BonusStage = 0 | 1 | 2;
+
   type StateCheck = {
     status: "solved" | "stuck" | "inProgress";
     movesAvailable: number;
@@ -59,22 +64,19 @@
     keys: string[];
   };
 
-  type RuntimeWindow = Window & {
-    __TAURI_INTERNALS__?: unknown;
-  };
-
   type UserOptionsConfig = {
     theme?: ThemePref;
     nColors?: number;
-    nEmptyContainers?: number;
     containerVolume?: number;
     singleBlockMode?: boolean;
     autoNextEnabled?: boolean;
     autoNextSeconds?: number;
+    showColumnKeys?: boolean;
   };
 
   const FALLBACK_KEYS = "1234567890QWERTYUIO";
   const HISTORY_KEY = "sorted_history_v1";
+  const SHOW_COLUMN_KEYS_KEY = "sorted_show_column_keys";
   const USER_OPTIONS_CONFIG_PATH = "/user-options.config.json";
   const BOARD_LAYOUTS: Record<number, BoardLayoutOption[]> = {
     4: [{ rows: 1, counts: [4] }],
@@ -92,8 +94,8 @@
     16: [{ rows: 2, counts: [8, 8] }, { rows: 3, counts: [6, 5, 5] }],
     17: [{ rows: 2, counts: [9, 8] }, { rows: 3, counts: [6, 6, 5] }]
   };
-  const BOARD_ITEM_TARGET_WIDTH = 104;
-  const BOARD_GAP_PX = 16;
+  const BOARD_ITEM_TARGET_WIDTH = 36;
+  const BOARD_GAP_PX = 4;
 
   const KEY_LAYOUT_BY_NCONTAINERS: Record<number, KeyLayoutOption[]> = {
     3: [{ rows: 1, keys: ["1", "2", "3"] }],
@@ -153,17 +155,24 @@
   let themePref = $state<ThemePref>("system");
   let systemDark = $state(false);
 
-  let settings = $state<PuzzleSettings>({ nColors: 9, nEmptyContainers: 2, containerVolume: 5 });
+  let settings = $state<PuzzleSettings>({ nColors: 12, nEmptyContainers: 2, containerVolume: 4 });
   let singleMode = $state(false);
   let autoNextEnabled = $state(true);
   let autoNextSeconds = $state(12);
   let showHistory = $state(false);
   let showOptions = $state(false);
+  let showColumnKeys = $state(true);
+  let hasColumnKeyPreference = $state(false);
+  let coarsePointer = $state(false);
 
-  let board = $state<PuzzleState>({ containers: [], containerVolume: 5 });
+  let board = $state<PuzzleState>({ containers: [], containerVolume: 4 });
   let initialState = $state<PuzzleState | null>(null);
-  let moveHistory = $state<Move[]>([]);
-  let redoHistory = $state<Move[]>([]);
+  let moveHistory = $state<GameAction[]>([]);
+  let redoHistory = $state<GameAction[]>([]);
+  let containerCapacities = $state<number[]>([]);
+  let initialContainerCapacities = $state<number[]>([]);
+  let bonusContainerStage = $state<BonusStage>(0);
+  let initialBonusContainerStage = $state<BonusStage>(0);
   let selectedSrc = $state<number | null>(null);
   let userMoves = $state(0);
   let totalMoves = $state(0);
@@ -182,6 +191,8 @@
   let countdownIntervalId: ReturnType<typeof setInterval> | null = null;
   let gameTimerIntervalId: ReturnType<typeof setInterval> | null = null;
   let boardViewportWidth = $state(0);
+  let viewportWidth = $state(0);
+  let viewportHeight = $state(0);
 
   let pastPuzzles = $state<PastPuzzle[]>([]);
 
@@ -214,8 +225,42 @@
   });
 
   const currentPuzzleSeed = $derived(currentSeed || "n/a");
-  const totalContainers = $derived(settings.nColors + settings.nEmptyContainers);
-  const boardRowCounts = $derived.by(() => pickBoardLayout(board.containers.length, boardViewportWidth));
+  const effectiveEmptyContainers = $derived(settings.nEmptyContainers + bonusContainerStage * 0.5);
+  const totalContainers = $derived(settings.nColors + effectiveEmptyContainers);
+  const isMobileLayout = $derived(viewportWidth > 0 && viewportWidth <= 720);
+  const forceSingleBoardRow = $derived(!showColumnKeys && board.containerVolume >= 10);
+  const boardRowCounts = $derived.by(() => {
+    if (forceSingleBoardRow) {
+      return [board.containers.length];
+    }
+    return pickBoardLayout(board.containers.length, boardViewportWidth);
+  });
+  const boardWidestRow = $derived.by(() => {
+    if (boardRowCounts.length === 0) {
+      return Math.max(board.containers.length, 1);
+    }
+    return Math.max(...boardRowCounts);
+  });
+  const boardCellSize = $derived.by(() => computeBoardCellSize({
+    availableWidth: boardViewportWidth,
+    availableHeight: viewportHeight,
+    volume: board.containerVolume || settings.containerVolume,
+    rowCount: Math.max(boardRowCounts.length, 1),
+    widestRow: Math.max(boardWidestRow, 1),
+    compact: isMobileLayout,
+    showColumnKeys
+  }));
+  const boardStyle = $derived.by(() => {
+    const boardGap = isMobileLayout ? "0.18rem" : "0.35rem";
+    const rowGap = isMobileLayout ? "0.45rem" : "0.7rem";
+    const cellGap = isMobileLayout ? "1px" : "2px";
+    const sidePad = isMobileLayout ? "1px" : "2px";
+    const bottomPad = isMobileLayout ? "1px" : "2px";
+    const topPad = showColumnKeys
+      ? (isMobileLayout ? "0.72rem" : "0.82rem")
+      : (isMobileLayout ? "0.16rem" : "0.28rem");
+    return `--cell-size:${boardCellSize}px; --board-gap:${boardGap}; --row-gap:${rowGap}; --cell-gap:${cellGap}; --container-side-pad:${sidePad}; --container-bottom-pad:${bottomPad}; --container-top-pad:${topPad};`;
+  });
   const boardRows = $derived.by(() => {
     const rows: Array<Array<{ container: number[]; index: number }>> = [];
     let startIndex = 0;
@@ -251,18 +296,89 @@
     };
   }
 
-  function toBackendState(state: PuzzleState): BackendPuzzleState {
-    return {
-      vials: state.containers.map((v) => [...v]),
-      nVolume: state.containerVolume
-    };
-  }
-
   function cloneState(state: PuzzleState): PuzzleState {
     return {
       containerVolume: state.containerVolume,
       containers: state.containers.map((v) => [...v])
     };
+  }
+
+  function defaultContainerCapacities(state: PuzzleState): number[] {
+    return Array.from({ length: state.containers.length }, () => state.containerVolume);
+  }
+
+  function containerCapacityFor(state: PuzzleState, capacities: number[], index: number): number {
+    return capacities[index] ?? state.containerVolume;
+  }
+
+  function applyBonusSectionToState(
+    state: PuzzleState,
+    capacities: number[],
+    stage: BonusStage
+  ): { state: PuzzleState; capacities: number[]; stage: BonusStage } | null {
+    if (stage === 2) {
+      return null;
+    }
+
+    const nextState = cloneState(state);
+    const nextCaps = [...capacities];
+
+    if (stage === 0) {
+      const halfVolume = Math.max(1, Math.floor(state.containerVolume / 2));
+      nextState.containers.push([]);
+      nextCaps.push(halfVolume);
+      return { state: nextState, capacities: nextCaps, stage: 1 };
+    }
+
+    const index = nextState.containers.length - 1;
+    if (index < 0) {
+      return null;
+    }
+    nextCaps[index] = state.containerVolume;
+    return { state: nextState, capacities: nextCaps, stage: 2 };
+  }
+
+  function applyActionToState(
+    state: PuzzleState,
+    capacities: number[],
+    stage: BonusStage,
+    action: GameAction
+  ): { state: PuzzleState; capacities: number[]; stage: BonusStage } | null {
+    if (action.kind === "bonusSection") {
+      return applyBonusSectionToState(state, capacities, stage);
+    }
+
+    const next = applyMove(state, action.move, capacities);
+    if (!next) {
+      return null;
+    }
+    return { state: next, capacities: [...capacities], stage };
+  }
+
+  function rebuildFromActionHistory(actions: GameAction[]): {
+    state: PuzzleState;
+    capacities: number[];
+    stage: BonusStage;
+  } | null {
+    if (!initialState) {
+      return null;
+    }
+
+    let rebuiltState = cloneState(initialState);
+    let rebuiltCaps = [...initialContainerCapacities];
+    let rebuiltStage = initialBonusContainerStage;
+
+    for (const action of actions) {
+      const applied = applyActionToState(rebuiltState, rebuiltCaps, rebuiltStage, action);
+      if (!applied) {
+        return null;
+      }
+      rebuiltState = applied.state;
+      rebuiltCaps = applied.capacities;
+      rebuiltStage = applied.stage;
+    }
+
+    return { state: rebuiltState, capacities: rebuiltCaps, stage: rebuiltStage };
   }
 
   function pickBoardLayout(nContainers: number, availableWidth: number): number[] {
@@ -283,6 +399,42 @@
     }
 
     return options[options.length - 1].counts;
+  }
+
+  function computeBoardCellSize(input: {
+    availableWidth: number;
+    availableHeight: number;
+    volume: number;
+    rowCount: number;
+    widestRow: number;
+    compact: boolean;
+    showColumnKeys: boolean;
+  }): number {
+    const volume = Math.max(1, input.volume || 1);
+    const widestRow = Math.max(1, input.widestRow || 1);
+    const rowCount = Math.max(1, input.rowCount || 1);
+    const borderWidth = 2;
+    const boardGap = input.compact ? 3 : 6;
+    const rowGap = input.compact ? 7 : 11;
+    const cellGap = input.compact ? 1 : 2;
+    const sidePad = input.compact ? 1 : 2;
+    const bottomPad = input.compact ? 1 : 2;
+    const topPad = input.showColumnKeys
+      ? (input.compact ? 12 : 14)
+      : (input.compact ? 3 : 5);
+    const widthAvailable = Math.max(140, input.availableWidth || 320);
+    const heightAvailable = Math.max(280, input.availableHeight || 640);
+    const reservedHeight = input.compact ? 250 : 310;
+    const boardHeightBudget = Math.max(120, heightAvailable - reservedHeight);
+    const widthLimited = (
+      widthAvailable - (widestRow - 1) * boardGap - widestRow * (sidePad * 2 + borderWidth * 2)
+    ) / widestRow;
+    const heightLimited = (
+      boardHeightBudget - (rowCount - 1) * rowGap - rowCount * (topPad + bottomPad + borderWidth * 2) - rowCount * (volume - 1) * cellGap
+    ) / (rowCount * volume);
+    const minSize = input.compact ? 12 : 18;
+    const maxSize = input.compact ? 42 : 56;
+    return Math.max(minSize, Math.min(maxSize, Math.floor(Math.min(widthLimited, heightLimited))));
   }
 
   function keyLabel(i: number): string {
@@ -338,13 +490,6 @@
     return { color, run };
   }
 
-  function isTauriRuntime(): boolean {
-    if (typeof window === "undefined") {
-      return false;
-    }
-    return !!(window as RuntimeWindow).__TAURI_INTERNALS__;
-  }
-
   function seedToU64(seedHex: string): bigint {
     const normalized = seedHex.trim().toUpperCase();
     if (!/^[0-9A-F]{16}$/.test(normalized)) {
@@ -375,12 +520,14 @@
     }
   }
 
-  function isSolvedState(state: PuzzleState): boolean {
-    for (const container of state.containers) {
+  function isSolvedState(state: PuzzleState, capacities: number[]): boolean {
+    for (let i = 0; i < state.containers.length; i += 1) {
+      const container = state.containers[i];
+      const capacity = containerCapacityFor(state, capacities, i);
       if (container.length === 0) {
         continue;
       }
-      if (container.length !== state.containerVolume) {
+      if (container.length !== capacity) {
         return false;
       }
       const first = container[0];
@@ -393,11 +540,11 @@
     return true;
   }
 
-  function availableMoveCount(state: PuzzleState): number {
+  function availableMoveCount(state: PuzzleState, capacities: number[]): number {
     let count = 0;
     for (let src = 0; src < state.containers.length; src += 1) {
       for (let dst = 0; dst < state.containers.length; dst += 1) {
-        if (canApplyMove(state, src, dst)) {
+        if (canApplyMove(state, src, dst, capacities)) {
           count += 1;
         }
       }
@@ -405,13 +552,12 @@
     return count;
   }
 
-  function fallbackCheckState(state: BackendPuzzleState): StateCheck {
-    const uiState = fromBackendState(state);
-    if (isSolvedState(uiState)) {
+  function fallbackCheckState(state: PuzzleState, capacities: number[]): StateCheck {
+    if (isSolvedState(state, capacities)) {
       return { status: "solved", movesAvailable: 0 };
     }
 
-    const movesAvailable = availableMoveCount(uiState);
+    const movesAvailable = availableMoveCount(state, capacities);
     if (movesAvailable === 0) {
       return { status: "stuck", movesAvailable };
     }
@@ -452,20 +598,19 @@
     return fallbackRandomPuzzle(settingsInput, seedHex);
   }
 
-  async function checkState(state: BackendPuzzleState, singleModeInput: boolean): Promise<StateCheck> {
-    if (isTauriRuntime()) {
-      return invoke<StateCheck>("check_state", { state, singleMode: singleModeInput });
-    }
-    return fallbackCheckState(state);
+  async function checkState(state: PuzzleState, capacities: number[]): Promise<StateCheck> {
+    void singleMode;
+    return fallbackCheckState(state, capacities);
   }
 
-  function canApplyMove(state: PuzzleState, src: number, dst: number): boolean {
+  function canApplyMove(state: PuzzleState, src: number, dst: number, capacities: number[]): boolean {
     if (src === dst) {
       return false;
     }
     const srcContainer = state.containers[src];
     const dstContainer = state.containers[dst];
-    if (!srcContainer || !dstContainer || srcContainer.length === 0 || dstContainer.length >= state.containerVolume) {
+    const dstCapacity = containerCapacityFor(state, capacities, dst);
+    if (!srcContainer || !dstContainer || srcContainer.length === 0 || dstContainer.length >= dstCapacity) {
       return false;
     }
 
@@ -483,8 +628,8 @@
     return !!dTop && dTop.color === sTop.color;
   }
 
-  function applyMove(state: PuzzleState, move: Move): PuzzleState | null {
-    if (!canApplyMove(state, move.src, move.dst)) {
+  function applyMove(state: PuzzleState, move: Move, capacities: number[]): PuzzleState | null {
+    if (!canApplyMove(state, move.src, move.dst, capacities)) {
       return null;
     }
 
@@ -496,7 +641,8 @@
       return null;
     }
 
-    const amount = singleMode ? 1 : Math.min(srcTop.run, state.containerVolume - dstContainer.length);
+    const dstCapacity = containerCapacityFor(state, capacities, move.dst);
+    const amount = singleMode ? 1 : Math.min(srcTop.run, dstCapacity - dstContainer.length);
     for (let i = 0; i < amount; i += 1) {
       const val = srcContainer.pop();
       if (val === undefined) {
@@ -513,6 +659,10 @@
 
   function padNumber(value: number): string {
     return value.toString().padStart(2, "0");
+  }
+
+  function formatEmptyContainers(value: number): string {
+    return Number.isInteger(value) ? value.toString() : value.toFixed(1);
   }
 
   function toFiniteNumber(value: unknown): number | null {
@@ -549,14 +699,14 @@
       settings.nColors = clampInteger(configuredColors, 2, 14);
     }
 
-    const configuredEmptyContainers = toFiniteNumber(config.nEmptyContainers);
-    if (configuredEmptyContainers !== null) {
-      settings.nEmptyContainers = clampInteger(configuredEmptyContainers, 1, 3);
-    }
-
     const configuredVolume = toFiniteNumber(config.containerVolume);
     if (configuredVolume !== null) {
       settings.containerVolume = clampInteger(configuredVolume, 2, 20);
+    }
+
+    if (typeof config.showColumnKeys === "boolean") {
+      showColumnKeys = config.showColumnKeys;
+      hasColumnKeyPreference = true;
     }
   }
 
@@ -647,11 +797,11 @@
         totalMoves: entry.totalMoves ?? entry.userMoves ?? 0,
         elapsedSeconds: entry.elapsedSeconds ?? 0,
         settings: {
-          nColors: entry.settings?.nColors ?? 9,
+          nColors: entry.settings?.nColors ?? 12,
           nEmptyContainers:
             entry.settings?.nEmptyContainers ??
-            ((entry.settings?.nContainers ?? (entry.settings?.nColors ?? 9) + 2) - (entry.settings?.nColors ?? 9)),
-          containerVolume: entry.settings?.containerVolume ?? entry.settings?.nVolume ?? 5
+            ((entry.settings?.nContainers ?? (entry.settings?.nColors ?? 12) + 2) - (entry.settings?.nColors ?? 12)),
+          containerVolume: entry.settings?.containerVolume ?? entry.settings?.nVolume ?? 4
         }
       }));
     } catch {
@@ -664,8 +814,11 @@
     clearGameTimer();
     overlayOpen = false;
     selectedSrc = null;
+    settings.nEmptyContainers = 2;
     moveHistory = [];
     redoHistory = [];
+    bonusContainerStage = 0;
+    initialBonusContainerStage = 0;
     userMoves = 0;
     totalMoves = 0;
     elapsedSeconds = 0;
@@ -680,11 +833,53 @@
     currentSeed = seedHex;
     seedInput = seedHex;
     initialState = cloneState(board);
+    containerCapacities = defaultContainerCapacities(board);
+    initialContainerCapacities = [...containerCapacities];
     statusLine = "Puzzle loaded. Pick source then target container.";
   }
 
+  function confirmNewRandomPuzzle(): void {
+    if (window.confirm("Generate a new random puzzle? Current progress will be lost.")) {
+      void newRandomPuzzle();
+    }
+  }
+
+  async function addContainerSection(): Promise<void> {
+    if (bonusContainerStage >= 2 || !initialState) {
+      return;
+    }
+
+    const applied = applyBonusSectionToState(board, containerCapacities, bonusContainerStage);
+    if (!applied) {
+      statusLine = "Could not add container section.";
+      return;
+    }
+
+    if (!gameTimerIntervalId) {
+      startGameTimer();
+    }
+
+    board = applied.state;
+    containerCapacities = applied.capacities;
+    bonusContainerStage = applied.stage;
+    moveHistory = [...moveHistory, { kind: "bonusSection" }];
+    redoHistory = [];
+    userMoves += 1;
+    totalMoves += 1;
+    selectedSrc = null;
+
+    statusLine = bonusContainerStage === 1
+      ? "Added half empty container section. Press + once more to finalize."
+      : "Upgraded bonus container to full capacity.";
+
+    const check = await checkState(board, containerCapacities);
+    if (check.status === "solved" || check.status === "stuck") {
+      await openStats(check.status);
+    }
+  }
+
   async function applyUserMove(move: Move): Promise<void> {
-    const updated = applyMove(board, move);
+    const updated = applyMove(board, move, containerCapacities);
     if (!updated) {
       selectedSrc = move.src;
       statusLine = "Invalid move. Source kept selected.";
@@ -696,13 +891,13 @@
       startGameTimer();
     }
     board = updated;
-    moveHistory = [...moveHistory, move];
+    moveHistory = [...moveHistory, { kind: "pour", move }];
     redoHistory = [];
     userMoves += 1;
     totalMoves += 1;
     statusLine = `Move ${userMoves}: ${formatMove(move)}`;
 
-    const check = await checkState(toBackendState(board), singleMode);
+    const check = await checkState(board, containerCapacities);
     if (check.status === "solved" || check.status === "stuck") {
       await openStats(check.status);
     }
@@ -743,7 +938,7 @@
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
       ev.preventDefault();
       if (ev.shiftKey) {
-        redoMove();
+        await redoMove();
       } else {
         undoMove();
       }
@@ -773,7 +968,7 @@
     }
     if (ev.key === "ArrowRight") {
       ev.preventDefault();
-      redoMove();
+      await redoMove();
       return;
     }
     if (ev.key.toLowerCase() === "m") {
@@ -829,45 +1024,58 @@
     }
 
     const nextHistory = moveHistory.slice(0, -1);
-    let rebuilt = cloneState(initialState);
-    for (const move of nextHistory) {
-      const applied = applyMove(rebuilt, move);
-      if (!applied) {
-        statusLine = "Undo failed due to inconsistent state.";
-        return;
-      }
-      rebuilt = applied;
+    const rebuilt = rebuildFromActionHistory(nextHistory);
+    if (!rebuilt) {
+      statusLine = "Undo failed due to inconsistent state.";
+      return;
     }
 
-    board = rebuilt;
+    board = rebuilt.state;
+    containerCapacities = rebuilt.capacities;
+    bonusContainerStage = rebuilt.stage;
     const undoneMove = moveHistory[moveHistory.length - 1];
     moveHistory = nextHistory;
     redoHistory = undoneMove ? [...redoHistory, undoneMove] : redoHistory;
     userMoves = nextHistory.length;
     totalMoves += 1;
     selectedSrc = null;
+
+    // Undoing from a stuck end state should return the player to active play.
+    if (overlayOpen && overlayStatus === "stuck") {
+      overlayOpen = false;
+    }
+
     statusLine = "Undid last move.";
   }
 
-  function redoMove(): void {
+  async function redoMove(): Promise<void> {
     if (redoHistory.length === 0) {
       return;
     }
 
-    const move = redoHistory[redoHistory.length - 1];
-    const next = applyMove(board, move);
-    if (!next) {
+    const action = redoHistory[redoHistory.length - 1];
+    const applied = applyActionToState(board, containerCapacities, bonusContainerStage, action);
+    if (!applied) {
       statusLine = "Redo failed.";
       return;
     }
 
-    board = next;
-    moveHistory = [...moveHistory, move];
+    board = applied.state;
+    containerCapacities = applied.capacities;
+    bonusContainerStage = applied.stage;
+    moveHistory = [...moveHistory, action];
     redoHistory = redoHistory.slice(0, -1);
     userMoves = moveHistory.length;
     totalMoves += 1;
     selectedSrc = null;
-    statusLine = `Redid move: ${formatMove(move)}`;
+    statusLine = action.kind === "pour"
+      ? `Redid move: ${formatMove(action.move)}`
+      : "Redid bonus container section.";
+
+    const check = await checkState(board, containerCapacities);
+    if (check.status === "stuck") {
+      showEndOverlay("stuck", false);
+    }
   }
 
   function restartCurrentPuzzle(): void {
@@ -879,6 +1087,8 @@
     clearGameTimer();
     overlayOpen = false;
     board = cloneState(initialState);
+    containerCapacities = [...initialContainerCapacities];
+    bonusContainerStage = initialBonusContainerStage;
     moveHistory = [];
     redoHistory = [];
     userMoves = 0;
@@ -915,8 +1125,13 @@
 
     clearCountdown();
     clearGameTimer();
+    settings.nEmptyContainers = 2;
     board = fromBackendState(seeded);
     initialState = cloneState(fromBackendState(seeded));
+    containerCapacities = defaultContainerCapacities(board);
+    initialContainerCapacities = [...containerCapacities];
+    bonusContainerStage = 0;
+    initialBonusContainerStage = 0;
     currentSeed = seedHex;
     seedInput = seedHex;
     moveHistory = [];
@@ -986,7 +1201,11 @@
       id: crypto.randomUUID(),
       finishedAt: new Date().toISOString(),
       puzzleSeed: currentSeed,
-      settings: { ...settings },
+      settings: {
+        nColors: settings.nColors,
+        containerVolume: settings.containerVolume,
+        nEmptyContainers: effectiveEmptyContainers
+      },
       singleMode,
       initialState: cloneState(initialState),
       userMoves,
@@ -998,11 +1217,13 @@
     saveHistory();
   }
 
-  async function openStats(endedAs: "solved" | "stuck"): Promise<void> {
+  function showEndOverlay(endedAs: "solved" | "stuck", recordHistory: boolean): void {
     clearGameTimer();
     overlayOpen = true;
     overlayStatus = endedAs;
-    addPastPuzzle({ endedAs });
+    if (recordHistory) {
+      addPastPuzzle({ endedAs });
+    }
     if (endedAs === "solved") {
       startCountdown();
     } else {
@@ -1010,13 +1231,41 @@
     }
   }
 
+  async function openStats(endedAs: "solved" | "stuck"): Promise<void> {
+    showEndOverlay(endedAs, true);
+  }
+
   function playAgain(entry: PastPuzzle): void {
     clearCountdown();
     clearGameTimer();
-    settings = { ...entry.settings };
+    settings = {
+      nColors: entry.settings.nColors,
+      containerVolume: entry.settings.containerVolume,
+      nEmptyContainers: 2
+    };
     singleMode = entry.singleMode;
-    board = cloneState(entry.initialState);
-    initialState = cloneState(entry.initialState);
+    let loadedBase = cloneState(entry.initialState);
+    let loadedCaps = defaultContainerCapacities(loadedBase);
+    let loadedStage: BonusStage = 0;
+    const targetStage: BonusStage = entry.settings.nEmptyContainers >= 3
+      ? 2
+      : (entry.settings.nEmptyContainers >= 2.5 ? 1 : 0);
+    while (loadedStage < targetStage) {
+      const applied = applyBonusSectionToState(loadedBase, loadedCaps, loadedStage);
+      if (!applied) {
+        break;
+      }
+      loadedBase = applied.state;
+      loadedCaps = applied.capacities;
+      loadedStage = applied.stage;
+    }
+
+    board = loadedBase;
+    initialState = cloneState(loadedBase);
+    containerCapacities = loadedCaps;
+    initialContainerCapacities = [...loadedCaps];
+    bonusContainerStage = loadedStage;
+    initialBonusContainerStage = loadedStage;
     currentSeed = entry.puzzleSeed;
     seedInput = entry.puzzleSeed;
     moveHistory = [];
@@ -1036,7 +1285,7 @@
       settings.nColors = clampedColors;
     }
 
-    const clampedEmpty = Math.max(1, Math.min(3, Math.trunc(settings.nEmptyContainers || 1)));
+    const clampedEmpty = 2;
     if (settings.nEmptyContainers !== clampedEmpty) {
       settings.nEmptyContainers = clampedEmpty;
     }
@@ -1067,13 +1316,29 @@
     localStorage.setItem("sorted_theme_pref", themePref);
   });
 
+  $effect(() => {
+    if (!hasColumnKeyPreference) {
+      return;
+    }
+    localStorage.setItem(SHOW_COLUMN_KEYS_KEY, showColumnKeys ? "true" : "false");
+  });
+
   onMount(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const coarsePointerMq = window.matchMedia("(pointer: coarse)");
     systemDark = mq.matches;
+    coarsePointer = coarsePointerMq.matches;
     const listener = (ev: MediaQueryListEvent) => {
       systemDark = ev.matches;
     };
+    const coarsePointerListener = (ev: MediaQueryListEvent) => {
+      coarsePointer = ev.matches;
+      if (!hasColumnKeyPreference) {
+        showColumnKeys = !ev.matches;
+      }
+    };
     mq.addEventListener("change", listener);
+    coarsePointerMq.addEventListener("change", coarsePointerListener);
 
     const initialize = async () => {
       await loadUserOptionsConfig();
@@ -1082,6 +1347,14 @@
       const savedTheme = localStorage.getItem("sorted_theme_pref") as ThemePref | null;
       if (savedTheme === "system" || savedTheme === "light" || savedTheme === "dark") {
         themePref = savedTheme;
+      }
+
+      const savedColumnKeys = localStorage.getItem(SHOW_COLUMN_KEYS_KEY);
+      if (savedColumnKeys === "true" || savedColumnKeys === "false") {
+        showColumnKeys = savedColumnKeys === "true";
+        hasColumnKeyPreference = true;
+      } else {
+        showColumnKeys = !coarsePointer;
       }
 
       loadHistory();
@@ -1094,11 +1367,12 @@
       clearCountdown();
       clearGameTimer();
       mq.removeEventListener("change", listener);
+      coarsePointerMq.removeEventListener("change", coarsePointerListener);
     };
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window bind:innerWidth={viewportWidth} bind:innerHeight={viewportHeight} onkeydown={onKeydown} />
 
 <main id="app-main" class="page">
   <header id="app-header" class="topbar">
@@ -1107,10 +1381,14 @@
     </div>
     <div id="header-actions" class="header-actions">
       <button id="button-theme-toggle" type="button" class="icon-button" onclick={toggleThemeQuick} aria-label="Toggle light or dark theme">
-        {effectiveDark ? "☀" : "☾"}
+        {#if effectiveDark}
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="button-icon"><use href="/icons/icon-theme-light.svg#icon-theme-light"/></svg>
+        {:else}
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="button-icon fill-icon"><use href="/icons/icon-theme-dark.svg#icon-theme-dark"/></svg>
+        {/if}
       </button>
-      <button id="button-toggle-options" type="button" class="icon-button" onclick={toggleOptionsOverlay} aria-expanded={showOptions} aria-controls="section-options">
-        ☰
+      <button id="button-toggle-options" type="button" class="icon-button" onclick={toggleOptionsOverlay} aria-expanded={showOptions} aria-controls="section-options" aria-label="Toggle options menu" title="Toggle options menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="button-icon"><use href="/icons/icon-menu.svg#icon-menu"/></svg>
       </button>
     </div>
   </header>
@@ -1141,11 +1419,8 @@
             <span class="slider-label"><span>Colors</span><output for="input-n-colors">{settings.nColors}</output></span>
             <input id="input-n-colors" type="range" min="2" max="14" step="1" bind:value={settings.nColors} />
           </label>
-          <label for="input-empty-containers">
-            <span class="slider-label"><span>Empty Containers</span><output for="input-empty-containers">{settings.nEmptyContainers}</output></span>
-            <input id="input-empty-containers" type="range" min="1" max="3" step="1" bind:value={settings.nEmptyContainers} />
-          </label>
-          <p id="text-total-containers" class="meta-text">Total Containers: {totalContainers}</p>
+          <p id="text-empty-containers" class="meta-text">Empty Containers: {formatEmptyContainers(effectiveEmptyContainers)}</p>
+          <p id="text-total-containers" class="meta-text">Total Containers: {formatEmptyContainers(totalContainers)}</p>
           <label for="input-container-volume">
             <span class="slider-label"><span>Container Volume</span><output for="input-container-volume">{settings.containerVolume}</output></span>
             <input id="input-container-volume" type="range" min="2" max="20" step="1" bind:value={settings.containerVolume} />
@@ -1161,6 +1436,17 @@
               <option value="light">Light</option>
               <option value="dark">Dark</option>
             </select>
+          </label>
+          <label for="input-show-column-keys" class="check">
+            <input
+              id="input-show-column-keys"
+              type="checkbox"
+              bind:checked={showColumnKeys}
+              onchange={() => {
+                hasColumnKeyPreference = true;
+              }}
+            />
+            Show Column Keys
           </label>
         </div>
 
@@ -1184,19 +1470,20 @@
             <span id="seed-input-row" class="seed-input-row">
               <input id="input-puzzle-seed" type="text" placeholder="16 hex chars (e.g. 0A1B2C3D4E5F6789)" bind:value={seedInput} />
               <button id="button-copy-seed" type="button" class="icon-button" onclick={copyCurrentSeed} disabled={!currentSeed} aria-label="Copy current puzzle seed" title="Copy current puzzle seed">
-                <svg viewBox="0 0 17 22.25" aria-hidden="true" class="button-icon"><path d="M16.5,2.87v9.27c0,1.31-1.06,2.37-2.37,2.37h-3.63v-5.63c0-1.31-1.06-2.37-2.37-2.37h-1.63v-3.63c0-1.31,1.06-2.37,2.37-2.37h5.27c1.31,0,2.37,1.06,2.37,2.37ZM.5,8.87v9.27c0,1.31,1.06,2.37,2.37,2.37h5.27c1.31,0,2.37-1.06,2.37-2.37v-9.27c0-1.31-1.06-2.37-2.37-2.37H2.87c-1.31,0-2.37,1.06-2.37,2.37Z"/></svg>
+                <svg viewBox="0 0 17 22.25" aria-hidden="true" class="button-icon"><use href="/icons/icon-copy-seed.svg#icon-copy-seed"/></svg>
               </button>
               <button id="button-paste-seed" type="button" class="icon-button" onclick={pasteSeedFromClipboard} aria-label="Paste puzzle seed" title="Paste puzzle seed">
-                <svg viewBox="0 0 17 22.25" aria-hidden="true" class="button-icon"><path d="M5.5,17.75h-2.23c-1.53,0-2.77-1.24-2.77-2.77V4.52C.5,2.99,1.74,1.75,3.27,1.75h.48v-.46c0-.44.31-.79.7-.79h4.11c.38,0,.7.35.7.79v.46h.48c1.53,0,2.77,1.24,2.77,2.77v2.23M3.75,1.75v.46c0,.44.31.79.7.79h4.11c.38,0,.7-.35.7-.79v-.46M7.87,6.75h5.27c1.31,0,2.37,1.06,2.37,2.37v9.27c0,1.31-1.06,2.37-2.37,2.37h-5.27c-1.31,0-2.37-1.06-2.37-2.37v-9.27c0-1.31,1.06-2.37,2.37-2.37Z"/><line x1="9" y1="17.25" x2="12" y2="17.25"/><line x1="9" y1="13.75" x2="12" y2="13.75"/><line x1="9" y1="10.25" x2="12" y2="10.25"/></svg>
+                <svg viewBox="0 0 17 22.25" aria-hidden="true" class="button-icon"><use href="/icons/icon-paste-seed.svg#icon-paste-seed"/></svg>
               </button>
               <button id="button-play-seed" type="button" class="icon-button" onclick={playSeedPuzzle} aria-label="Play puzzle seed" title="Play puzzle seed">
-                <svg viewBox="0 0 24 24" aria-hidden="true" class="button-icon fill-icon"><path d="M8 6v12l10-6Z"></path></svg>
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="button-icon fill-icon"><use href="/icons/icon-play-seed.svg#icon-play-seed"/></svg>
               </button>
             </span>
           </label>
           <p id="current-seed" class="meta-text">Current Puzzle Seed: <span class="seed-text">{currentPuzzleSeed}</span></p>
-          <button id="button-toggle-history" type="button" onclick={toggleHistoryOverlay}>
-            {showHistory ? "Hide" : "Show"} Past Puzzles
+          <button id="button-toggle-history" type="button" class="icon-with-label" onclick={toggleHistoryOverlay}>
+            <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-show-past-puzzles.svg#icon-show-past-puzzles"/></svg>
+            <span>{showHistory ? "Hide" : "Show"} Past Puzzles</span>
           </button>
         </div>
       </section>
@@ -1211,7 +1498,7 @@
   </section>
 
   <section id="game-board-wrapper" class="board-wrap" bind:clientWidth={boardViewportWidth}>
-    <div id="game-board" class="board" style={`--containers:${board.containers.length}; --container-volume:${board.containerVolume};`}>
+    <div id="game-board" class="board" class:single-row-volume={forceSingleBoardRow} style={`--containers:${board.containers.length}; --container-volume:${board.containerVolume}; ${boardStyle}`}>
       {#each boardRows as row}
         <div class="board-row" style={`--row-containers:${row.length};`}>
           {#each row as entry}
@@ -1223,9 +1510,16 @@
               onclick={() => onContainerClick(entry.index)}
               aria-label={`Container ${entry.index + 1}`}
             >
-              <span class="key-badge">{keyLabel(entry.index)}</span>
-              {#each Array(board.containerVolume) as _, rowIndex}
-                {@const value = entry.container[board.containerVolume - 1 - rowIndex] ?? 0}
+              {#if showColumnKeys}
+                <span class="key-badge">{keyLabel(entry.index)}</span>
+              {/if}
+              {#each Array(containerCapacities[entry.index] ?? board.containerVolume) as _, rowIndex}
+                {@const containerCapacity = containerCapacities[entry.index] ?? board.containerVolume}
+                {@const filledStartRow = containerCapacity - entry.container.length}
+                {@const logicalFilledIndex = rowIndex - filledStartRow}
+                {@const value = logicalFilledIndex < 0
+                  ? 0
+                  : (entry.container[entry.container.length - 1 - logicalFilledIndex] ?? 0)}
                 <span
                   class="cell"
                   style={`background:${palette[value] ?? "#fff"}`}
@@ -1239,9 +1533,21 @@
   </section>
 
   <div id="section-action-buttons" class="action-buttons" style={`--containers:${board.containers.length};`}>
-    <button id="button-undo-move" type="button" class="action-icon-button" onclick={undoMove} disabled={moveHistory.length === 0} aria-label="Undo move" title="Undo move">↶</button>
-    <button id="button-redo-move" type="button" class="action-icon-button" onclick={redoMove} disabled={redoHistory.length === 0} aria-label="Redo move" title="Redo move">↷</button>
-    <button id="button-restart-puzzle" type="button" class="action-icon-button" onclick={confirmRestartCurrentPuzzle} disabled={!initialState} aria-label="Restart puzzle" title="Restart puzzle">⟲</button>
+    <button id="button-undo-move" type="button" class="action-icon-button" onclick={undoMove} disabled={moveHistory.length === 0} aria-label="Undo move" title="Undo move">
+      <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-undo.svg#icon-undo"/></svg>
+    </button>
+    <button id="button-redo-move" type="button" class="action-icon-button" onclick={redoMove} disabled={redoHistory.length === 0} aria-label="Redo move" title="Redo move">
+      <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-redo.svg#icon-redo"/></svg>
+    </button>
+    <button id="button-restart-puzzle" type="button" class="action-icon-button" onclick={confirmRestartCurrentPuzzle} disabled={!initialState} aria-label="Restart puzzle" title="Restart puzzle">
+      <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-restart.svg#icon-restart"/></svg>
+    </button>
+    <button id="button-random-puzzle-inline" type="button" class="action-icon-button" onclick={confirmNewRandomPuzzle} aria-label="New puzzle" title="Generate a new puzzle">
+      <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-random-puzzle.svg#icon-random-puzzle"/></svg>
+    </button>
+    <button id="button-add-container-section" type="button" class="action-icon-button" onclick={addContainerSection} disabled={!initialState || bonusContainerStage >= 2} aria-label="Add container section" title="Add empty container section">
+      <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-add-container-section.svg#icon-add-container-section"/></svg>
+    </button>
   </div>
 
   {#if overlayOpen}
@@ -1261,13 +1567,28 @@
       {/if}
       <div id="overlay-actions" class="overlay-actions">
         {#if overlayStatus === "solved"}
-          <button id="button-overlay-next" type="button" onclick={newRandomPuzzle}>Start Next Now</button>
+          <button id="button-overlay-next" type="button" class="icon-with-label" onclick={newRandomPuzzle}>
+            <svg viewBox="0 0 24 24" class="button-icon fill-icon"><use href="/icons/icon-play-seed.svg#icon-play-seed"/></svg>
+            <span>Start Next Now</span>
+          </button>
         {:else}
-          <button id="button-overlay-undo" type="button" onclick={() => { overlayOpen = false; undoMove(); }}>Undo Move</button>
-          <button id="button-overlay-restart" type="button" onclick={confirmRestartCurrentPuzzle}>Restart Current Puzzle</button>
-          <button id="button-overlay-random" type="button" onclick={newRandomPuzzle}>Random Puzzle</button>
+          <button id="button-overlay-undo" type="button" class="icon-with-label" onclick={() => { overlayOpen = false; undoMove(); }}>
+            <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-undo.svg#icon-undo"/></svg>
+            <span>Undo Move</span>
+          </button>
+          <button id="button-overlay-restart" type="button" class="icon-with-label" onclick={confirmRestartCurrentPuzzle}>
+            <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-restart.svg#icon-restart"/></svg>
+            <span>Restart Current Puzzle</span>
+          </button>
+          <button id="button-overlay-random" type="button" class="icon-with-label" onclick={newRandomPuzzle}>
+            <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-random-puzzle.svg#icon-random-puzzle"/></svg>
+            <span>Random Puzzle</span>
+          </button>
         {/if}
-        <button id="button-overlay-history" type="button" onclick={() => (showHistory = true)}>Open Past Puzzles</button>
+        <button id="button-overlay-history" type="button" class="icon-with-label" onclick={() => (showHistory = true)}>
+          <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-show-past-puzzles.svg#icon-show-past-puzzles"/></svg>
+          <span>Open Past Puzzles</span>
+        </button>
       </div>
     </section>
   {/if}
@@ -1294,7 +1615,10 @@
       <section id="past-puzzles" class="history overlay-panel">
         <div id="past-puzzles-header" class="past-puzzles-header">
           <h2>Past Puzzles</h2>
-          <button id="button-clear-history" type="button" onclick={clearHistory}>Clear History</button>
+          <button id="button-clear-history" type="button" class="icon-with-label" onclick={clearHistory}>
+            <svg viewBox="0 0 24 24" class="button-icon"><use href="/icons/icon-clear-history.svg#icon-clear-history"/></svg>
+            <span>Clear History</span>
+          </button>
         </div>
         {#if pastPuzzles.length === 0}
           <p>No finished puzzles yet.</p>
@@ -1322,9 +1646,12 @@
                   <td>{puzzle.totalMoves}</td>
                   <td>{formatDuration(puzzle.elapsedSeconds)}</td>
                   <td>{puzzle.puzzleSeed || "n/a"}</td>
-                  <td>{puzzle.settings.nColors}/{puzzle.settings.nColors + puzzle.settings.nEmptyContainers}/{puzzle.settings.containerVolume}</td>
+                  <td>{puzzle.settings.nColors}/{puzzle.settings.containerVolume}/{formatEmptyContainers(puzzle.settings.nEmptyContainers)}</td>
                   <td>
-                    <button id={`button-play-again-${puzzle.id}`} type="button" onclick={() => playAgain(puzzle)}>Play Again</button>
+                    <button id={`button-play-again-${puzzle.id}`} type="button" class="icon-with-label" onclick={() => playAgain(puzzle)}>
+                      <svg viewBox="0 0 24 24" class="button-icon fill-icon"><use href="/icons/icon-play-seed.svg#icon-play-seed"/></svg>
+                      <span>Play Again</span>
+                    </button>
                   </td>
                 </tr>
               {/each}
@@ -1346,7 +1673,7 @@
   }
 
   .page {
-    padding: 1rem;
+    padding: clamp(0.65rem, 2.4vw, 1rem);
     max-width: 1480px;
     margin: 0 auto;
     display: grid;
@@ -1526,45 +1853,57 @@
     fill: currentColor;
     stroke: none;
   }
-/*
   .icon-with-label {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
+    justify-content: center;
   }
- */
 
   .board-wrap {
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 10px;
-    padding: 1.5rem;
+    padding: clamp(0.65rem, 2.4vw, 1.5rem);
+    overflow: hidden;
   }
 
   .board {
+    --board-gap: 0.35rem;
+    --row-gap: 0.7rem;
+    --cell-gap: 2px;
+    --cell-size: 24px;
+    --container-side-pad: 2px;
+    --container-bottom-pad: 2px;
+    --container-top-pad: 0.82rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1rem;
+    gap: var(--row-gap);
+  }
+
+  .board.single-row-volume {
+    --row-gap: 0;
   }
 
   .board-row {
     display: flex;
     justify-content: center;
-    gap: 1rem;
-    width: 100%;
+    gap: var(--board-gap);
+    width: min(100%, max-content);
   }
 
   .container {
     position: relative;
     display: grid;
-    grid-auto-rows: 30px;
-    gap: 4px;
-    padding: 1.55rem 0.38rem 0.4rem;
+    grid-auto-rows: auto;
+    align-content: end;
+    gap: var(--cell-gap);
+    box-sizing: border-box;
+    padding: var(--container-top-pad) var(--container-side-pad) var(--container-bottom-pad);
     border: 2px solid var(--line);
-    border-radius: 0 0 10px 10px;
-    min-height: 164px;
-    width: clamp(92px, 6.8vw, 112px);
+    border-radius: 0 0 8px 8px;
+    width: calc(var(--cell-size) + (var(--container-side-pad) * 2) + 4px);
   }
 
   .container.selected {
@@ -1573,17 +1912,20 @@
 
   .key-badge {
     position: absolute;
-    top: -0.78rem;
+    top: -0.46rem;
     left: 50%;
     transform: translateX(-50%);
-    font-size: 0.8rem;
+    font-size: clamp(0.44rem, calc(var(--cell-size) * 0.28), 0.62rem);
     border: 1px solid var(--line);
     border-radius: 999px;
-    padding: 0.08rem 0.42rem;
+    padding: 0.03rem 0.18rem;
     background: var(--surface);
   }
 
   .cell {
+    display: block;
+    width: var(--cell-size);
+    aspect-ratio: 1 / 1;
     border-radius: 2px;
     border: 1px solid var(--cell-stroke);
   }
@@ -1632,6 +1974,19 @@
     font-weight: 700;
   }
 
+  .action-icon-button .button-icon {
+    width: 74%;
+    height: 74%;
+  }
+
+  .action-icon-button:disabled {
+    color: #8b92a3;
+    border-color: #5f687b;
+    background: #222a38;
+    opacity: 0.68;
+    cursor: not-allowed;
+  }
+
   .past-puzzles-header {
     display: flex;
     justify-content: space-between;
@@ -1660,16 +2015,28 @@
   }
 
   @media (max-width: 720px) {
+    .page {
+      padding: 0.45rem;
+      gap: 0.7rem;
+    }
+
     .topbar {
-      grid-template-columns: 1fr;
+      grid-template-columns: 1fr auto;
       justify-items: stretch;
     }
 
     #header-brand,
     .header-actions {
       grid-column: auto;
+    }
+
+    #header-brand {
       justify-self: start;
       text-align: left;
+    }
+
+    .header-actions {
+      justify-self: end;
     }
 
     .status {
@@ -1679,6 +2046,10 @@
     .slider-label {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .board-wrap {
+      padding: 0.45rem;
     }
   }
 </style>

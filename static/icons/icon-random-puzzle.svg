@@ -1,0 +1,6 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="icon-random-puzzle" viewBox="0 0 24 24">
+    <path d="M20,12v4.8c0,1.77-1.43,3.2-3.2,3.2H7.2c-1.77,0-3.2-1.43-3.2-3.2V7.2c0-1.77,1.43-3.2,3.2-3.2h4.8"/>
+    <path d="M16,3h5v5M12,12L21,3"/>
+  </symbol>
+</svg>

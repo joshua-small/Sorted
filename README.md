@@ -20,3 +20,18 @@ This repository keeps building on that foundation as an independently maintained
 ### Provenance Note
 
 This repository contains the contents of the former sorted subdirectory, promoted to repository root and republished as a standalone project.
+
+## iPhone Development Testing
+
+While the game is in active development, the fastest way to test on iPhone is the web build (Safari + Add to Home Screen).
+
+1. Start the local preview server on your LAN:
+
+```bash
+npm run preview:mobile
+```
+
+1. On iPhone, open `http://<your-computer-ip>:4173` in Safari.
+1. Optional: use Share -> Add to Home Screen for an app-like fullscreen launch.
+
+The app includes a web manifest at `static/site.webmanifest` and Apple web-app meta tags in `src/app.html` for home screen install behavior.

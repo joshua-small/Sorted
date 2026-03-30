@@ -1,0 +1,23 @@
+﻿{
+  "name": "Sorted",
+  "short_name": "Sorted",
+  "description": "Color sorting puzzle game.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#1a1d22",
+  "background_color": "#1a1d22",
+  "icons": [
+    {
+      "src": "/icon-256.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
